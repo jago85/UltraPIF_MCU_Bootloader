@@ -380,6 +380,9 @@ int main(void)
 
         // don't use this update again
         InvalidateFirmwareUpdate();
+
+        // start the app
+        StartApp();
     }
     else
     {
