@@ -224,6 +224,62 @@ void FLASH_Read(uint32_t addr, uint16_t size, uint8_t *dst)
     FLASH_SetCs(CS_DISABLED);
 }
 
+void FLASH_WriteEnable(void)
+{
+    uint8_t cmd[1];
+
+    cmd[0] = 0x06;
+
+    FLASH_SetCs(CS_ENABLED);
+
+    HAL_SPI_Transmit_DMA(hspi_flash, cmd, sizeof(cmd));
+    while (hspi_flash->State != HAL_SPI_STATE_READY) ;
+
+    FLASH_SetCs(CS_DISABLED);
+}
+
+void FLASH_WaitBusy(void)
+{
+    uint8_t cmd[1];
+    uint8_t res[1];
+
+    cmd[0] = 0x05;
+
+    do
+    {
+        FLASH_SetCs(CS_ENABLED);
+
+        HAL_SPI_Transmit_DMA(hspi_flash, cmd, sizeof(cmd));
+        while (hspi_flash->State != HAL_SPI_STATE_READY) ;
+
+        res[0] = 0xff;
+        HAL_SPI_Receive_DMA(hspi_flash, res, sizeof(res));
+        while (hspi_flash->State != HAL_SPI_STATE_READY) ;
+
+        FLASH_SetCs(CS_DISABLED);
+    } while (res[0] & 0x01); // while BUSY = '1'
+}
+
+void FLASH_Write(uint32_t addr, uint16_t size, uint8_t *src)
+{
+    uint8_t cmd[4];
+
+    cmd[0] = 0x02;
+    cmd[1] = (addr >> 16);
+    cmd[2] = (addr >> 8);
+    cmd[3] = (addr >> 0);
+
+    FLASH_SetCs(CS_ENABLED);
+
+    HAL_SPI_Transmit_DMA(hspi_flash, cmd, sizeof(cmd));
+    while (hspi_flash->State != HAL_SPI_STATE_READY) ;
+
+    HAL_SPI_Transmit_DMA(hspi_flash, src, (uint16_t)size);
+    while (hspi_flash->State != HAL_SPI_STATE_READY) ;
+
+    FLASH_SetCs(CS_DISABLED);
+}
+
 bool CheckFirmwareUpdate(void)
 {
     uint32_t crc;
@@ -237,6 +293,15 @@ bool CheckFirmwareUpdate(void)
     CRC_Finalize(&crc);
 
     return (crc == CRC32_MAGIC);
+}
+
+void InvalidateFirmwareUpdate(void)
+{
+    uint32_t dummy = 0;
+
+    FLASH_WriteEnable();
+    FLASH_Write(112 * 1024 - 4, 4, (uint8_t *)&dummy);
+    FLASH_WaitBusy();
 }
 
 void UpdateFirmware(void)
@@ -312,7 +377,9 @@ int main(void)
     if (CheckFirmwareUpdate())
     {
         UpdateFirmware();
-        StartApp();
+
+        // don't use this update again
+        InvalidateFirmwareUpdate();
     }
     else
     {
